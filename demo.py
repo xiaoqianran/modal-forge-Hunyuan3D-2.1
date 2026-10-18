@@ -3,7 +3,7 @@ sys.path.insert(0, './hy3dshape')
 sys.path.insert(0, './hy3dpaint')
 
 from PIL import Image
-from hy3dshape.rembg import BackgroundRemover
+from hy3dshape.rembg import BackgroundRemover, prepare_foreground
 from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
 
 
@@ -22,11 +22,9 @@ model_path = 'tencent/Hunyuan3D-2.1'
 pipeline_shapegen = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(model_path)
 
 image_path = 'assets/demo.png'
-image = Image.open(image_path).convert("RGBA")
-if image.mode == 'RGB':
-    rembg = BackgroundRemover()
-    image = rembg(image)
+image = prepare_foreground(Image.open(image_path), BackgroundRemover())
 
+image.save('demo_foreground.png')
 mesh = pipeline_shapegen(image=image)[0]
 mesh.export('demo.glb')
 
@@ -42,6 +40,6 @@ paint_pipeline = Hunyuan3DPaintPipeline(conf)
 output_mesh_path = 'demo_textured.glb'
 output_mesh_path = paint_pipeline(
     mesh_path = "demo.glb", 
-    image_path = 'assets/demo.png',
+    image_path = 'demo_foreground.png',
     output_mesh_path = output_mesh_path
 )

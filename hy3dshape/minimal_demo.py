@@ -13,7 +13,7 @@
 # by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
 
 from PIL import Image
-from hy3dshape.rembg import BackgroundRemover
+from hy3dshape.rembg import BackgroundRemover, prepare_foreground
 from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
 
 model_path = 'tencent/Hunyuan3D-2.1'
@@ -21,11 +21,6 @@ pipeline_shapegen = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(model_path)
 
 image_path = 'demos/demo.png'
 
-image = Image.open(image_path).convert("RGBA")
-if image.mode == 'RGB':
-    rembg = BackgroundRemover()
-    image = rembg(image)
-
-image = image_path
+image = prepare_foreground(Image.open(image_path), BackgroundRemover())
 mesh = pipeline_shapegen(image=image)[0]
 mesh.export('demo.glb')

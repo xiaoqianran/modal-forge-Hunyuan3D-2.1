@@ -24,7 +24,7 @@ except Exception as e:
     print(f"Warning: Failed to apply torchvision fix: {e}")
 
 from hy3dshape import Hunyuan3DDiTFlowMatchingPipeline
-from hy3dshape.rembg import BackgroundRemover
+from hy3dshape.rembg import BackgroundRemover, prepare_foreground
 from hy3dshape.utils import logger
 from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
 from hy3dpaint.convert_utils import create_glb_with_pbr_materials
@@ -162,9 +162,7 @@ class ModelWorker:
             raise ValueError("No input image provided")
 
         # Convert to RGBA and remove background if needed
-        image = image.convert("RGBA")
-        if image.mode == "RGB":
-            image = self.rembg(image)
+        image = prepare_foreground(image, self.rembg)
 
         # Generate mesh 
         try:

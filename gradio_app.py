@@ -281,15 +281,12 @@ def _gen_shape(
     if MV_MODE:
         start_time = time.time()
         for k, v in image.items():
-            if check_box_rembg or v.mode == "RGB":
-                img = rmbg_worker(v.convert('RGB'))
-                image[k] = img
+            image[k] = prepare_foreground(v, rmbg_worker, force=check_box_rembg)
         time_meta['remove background'] = time.time() - start_time
     else:
-        if check_box_rembg or image.mode == "RGB":
-            start_time = time.time()
-            image = rmbg_worker(image.convert('RGB'))
-            time_meta['remove background'] = time.time() - start_time
+        start_time = time.time()
+        image = prepare_foreground(image, rmbg_worker, force=check_box_rembg)
+        time_meta['remove background'] = time.time() - start_time
 
     # remove disk io to make responding faster, uncomment at your will.
     # image.save(os.path.join(save_folder, 'rembg.png'))
@@ -829,7 +826,7 @@ if __name__ == '__main__':
     from hy3dshape import FaceReducer, FloaterRemover, DegenerateFaceRemover, MeshSimplifier, \
         Hunyuan3DDiTFlowMatchingPipeline
     from hy3dshape.pipelines import export_to_trimesh
-    from hy3dshape.rembg import BackgroundRemover
+    from hy3dshape.rembg import BackgroundRemover, prepare_foreground
 
     rmbg_worker = BackgroundRemover()
     i23d_worker = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(

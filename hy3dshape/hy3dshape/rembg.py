@@ -23,3 +23,11 @@ class BackgroundRemover():
     def __call__(self, image: Image.Image):
         output = remove(image, session=self.session, bgcolor=[255, 255, 255, 0])
         return output
+
+
+def prepare_foreground(image: Image.Image, remover: BackgroundRemover, force: bool = False) -> Image.Image:
+    """保留已有透明背景；无透明像素时自动抠图，force 强制重新抠图。"""
+    rgba = image.convert("RGBA")
+    if force or rgba.getchannel("A").getextrema()[0] == 255:
+        return remover(image.convert("RGB")).convert("RGBA")
+    return rgba
