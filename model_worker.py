@@ -4,6 +4,7 @@ Model worker for Hunyuan3D API server.
 import os
 import time
 import uuid
+import threading
 import base64
 import trimesh
 from io import BytesIO
@@ -89,6 +90,8 @@ class ModelWorker:
         self.mc_algo = mc_algo
         self.enable_flashvdm = enable_flashvdm
         self.compile = compile
+        # The Paint renderer mutates shared state: serialize GPU jobs per worker.
+        self._generation_lock = threading.Lock()
         
         logger.info(f"Loading the model {model_path} on worker {self.worker_id} ...")
 
@@ -140,8 +143,12 @@ class ModelWorker:
             "queue_length": self.get_queue_length(),
         }
 
-    @torch.inference_mode()
     def generate(self, uid, params):
+        with self._generation_lock:
+            return self._generate_unlocked(uid, params)
+
+    @torch.inference_mode()
+    def _generate_unlocked(self, uid, params):
         """
         Generate a 3D model from the given parameters.
         
@@ -204,10 +211,10 @@ class ModelWorker:
 
             
         except Exception as e:
-            logger.error(f"Texture generation failed: {e}")
-            # Fall back to untextured mesh if texture generation fails
-            final_save_path = initial_save_path
-            logger.warning(f"Using untextured mesh as fallback: {final_save_path}")
+            logger.exception("Texture generation failed for uid=%s", uid)
+            # Textured output is required by this API. Never report an untextured
+            # mesh as a successful textured GLB.
+            raise RuntimeError(f"Texture generation failed for uid={uid}") from e
 
         if self.low_vram_mode:
             torch.cuda.empty_cache()

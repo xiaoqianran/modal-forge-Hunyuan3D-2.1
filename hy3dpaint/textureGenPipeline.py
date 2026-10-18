@@ -13,6 +13,8 @@
 # by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
 
 import os
+import uuid
+import threading
 import torch
 import copy
 import trimesh
@@ -72,6 +74,7 @@ class Hunyuan3DPaintPipeline:
 
     def __init__(self, config=None) -> None:
         self.config = config if config is not None else Hunyuan3DPaintConfig()
+        self._paint_lock = threading.RLock()
         self.models = {}
         self.stats_logs = {}
         self.render = MeshRender(
@@ -91,6 +94,11 @@ class Hunyuan3DPaintPipeline:
 
     @torch.no_grad()
     def __call__(self, mesh_path=None, image_path=None, output_mesh_path=None, use_remesh=True, save_glb=True):
+        # The renderer/view processor hold mutable per-request state.
+        with self._paint_lock:
+            return self._run_paint(mesh_path, image_path, output_mesh_path, use_remesh, save_glb)
+
+    def _run_paint(self, mesh_path=None, image_path=None, output_mesh_path=None, use_remesh=True, save_glb=True):
         """Generate texture for 3D mesh using multiview diffusion"""
         # Ensure image_prompt is a list
         if isinstance(image_path, str):
@@ -105,7 +113,8 @@ class Hunyuan3DPaintPipeline:
         # Process mesh
         path = os.path.dirname(mesh_path)
         if use_remesh:
-            processed_mesh_path = os.path.join(path, "white_mesh_remesh.obj")
+            processed_mesh_path = os.path.join(os.path.dirname(output_mesh_path) if output_mesh_path else path, f"{uuid.uuid4().hex}_white_mesh_remesh.obj")
+            os.makedirs(os.path.dirname(processed_mesh_path), exist_ok=True)
             remesh_mesh(mesh_path, processed_mesh_path)
         else:
             processed_mesh_path = mesh_path

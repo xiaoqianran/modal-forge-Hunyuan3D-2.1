@@ -115,6 +115,20 @@ async def generate_3d_model(request: GenerationRequest):
         return JSONResponse(ret, status_code=404)
 
 
+# Background task failures must be visible to /status (single-process API).
+_task_errors = {}
+_task_lock = threading.Lock()
+
+
+def _run_generation_task(uid, params):
+    try:
+        worker.generate(uid, params)
+    except Exception as exc:
+        logger.exception("Asynchronous generation failed for uid=%s", uid)
+        with _task_lock:
+            _task_errors[str(uid)] = str(exc)
+
+
 @app.post("/send", response_model=GenerationResponse, tags=["generation"])
 async def send_generation_task(request: GenerationRequest):
     """
@@ -133,7 +147,7 @@ async def send_generation_task(request: GenerationRequest):
     
     uid = uuid.uuid4()
     try:
-        threading.Thread(target=worker.generate, args=(uid, params,)).start()
+        threading.Thread(target=_run_generation_task, args=(uid, params), daemon=True).start()
         ret = {"uid": str(uid)}
         return JSONResponse(ret, status_code=200)
     except Exception as e:
@@ -165,6 +179,11 @@ async def status(uid: str):
         StatusResponse: Current status of the task and result if completed
     """
     # Check for textured file first (preferred output)
+    with _task_lock:
+        task_error = _task_errors.get(uid)
+    if task_error is not None:
+        return JSONResponse({"status": "error", "message": task_error}, status_code=200)
+
     textured_file_path = os.path.join(SAVE_DIR, f'{uid}_textured.glb')
     initial_file_path = os.path.join(SAVE_DIR, f'{uid}_initial.glb')
     

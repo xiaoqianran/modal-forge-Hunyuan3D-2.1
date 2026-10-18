@@ -40,101 +40,68 @@ def combine_metallic_roughness(metallic_path, roughness_path, output_path):
 
 
 def create_glb_with_pbr_materials(obj_path, textures_dict, output_path):
-    """
-    使用pygltflib创建包含完整PBR材质的GLB文件
+    """Export PBR GLB without shared temp files; preserve all mesh primitives."""
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
 
-    textures_dict = {
-        'albedo': 'path/to/albedo.png',
-        'metallic': 'path/to/metallic.png',
-        'roughness': 'path/to/roughness.png',
-        'normal': 'path/to/normal.png',  # 可选
-        'ao': 'path/to/ao.png'  # 可选
-    }
-    """
-    # 1. 加载OBJ文件
+    inputs = dict(textures_dict)
     mesh = trimesh.load(obj_path)
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
-    # 2. 先导出为临时GLB
-    temp_glb = "temp.glb"
-    mesh.export(temp_glb)
+    def image_uri(path):
+        with Image.open(path) as picture:
+            fmt = picture.format
+        mime = {"JPEG": "image/jpeg", "PNG": "image/png"}.get(fmt)
+        if mime is None:
+            raise ValueError(f"Unsupported PBR image format: {path} ({fmt})")
+        return f"data:{mime};base64,{base64.b64encode(Path(path).read_bytes()).decode('ascii')}"
 
-    # 3. 加载GLB文件进行材质编辑
-    gltf = pygltflib.GLTF2().load(temp_glb)
+    with TemporaryDirectory(prefix="hy3d-pbr-") as folder:
+        temporary = Path(folder)
+        intermediate = temporary / "mesh.glb"
+        mesh.export(str(intermediate))
+        gltf = pygltflib.GLTF2().load(str(intermediate))
+        if inputs.get("metallic") and inputs.get("roughness"):
+            packed = temporary / "metallic_roughness.png"
+            combine_metallic_roughness(inputs["metallic"], inputs["roughness"], str(packed))
+            inputs["metallicRoughness"] = str(packed)
+        elif inputs.get("metallic") or inputs.get("roughness"):
+            raise ValueError("Both metallic and roughness maps are required for PBR packing")
 
-    # 4. 准备纹理数据
-    def image_to_data_uri(image_path):
-        """将图像转换为data URI"""
-        with open(image_path, "rb") as f:
-            image_data = f.read()
-        encoded = base64.b64encode(image_data).decode()
-        return f"data:image/png;base64,{encoded}"
+        texture_indices = {}
+        images, textures = [], []
+        for name in ("albedo", "metallicRoughness", "normal", "ao"):
+            path = inputs.get(name)
+            if not path:
+                continue
+            if not Path(path).is_file():
+                raise FileNotFoundError(f"Missing {name} texture: {path}")
+            texture_indices[name] = len(textures)
+            images.append(pygltflib.Image(uri=image_uri(path)))
+            textures.append(pygltflib.Texture(source=len(images) - 1))
 
-    # 5. 合并metallic和roughness
-    if "metallic" in textures_dict and "roughness" in textures_dict:
-        mr_combined_path = "mr_combined.png"
-        combine_metallic_roughness(textures_dict["metallic"], textures_dict["roughness"], mr_combined_path)
-        textures_dict["metallicRoughness"] = mr_combined_path
+        pbr = pygltflib.PbrMetallicRoughness(
+            baseColorFactor=[1.0, 1.0, 1.0, 1.0], metallicFactor=1.0,
+            roughnessFactor=1.0,
+        )
+        if "albedo" in texture_indices:
+            pbr.baseColorTexture = pygltflib.TextureInfo(index=texture_indices["albedo"])
+        if "metallicRoughness" in texture_indices:
+            pbr.metallicRoughnessTexture = pygltflib.TextureInfo(index=texture_indices["metallicRoughness"])
+        material = pygltflib.Material(name="PBR_Material", pbrMetallicRoughness=pbr)
+        if "normal" in texture_indices:
+            material.normalTexture = pygltflib.NormalTextureInfo(index=texture_indices["normal"])
+        if "ao" in texture_indices:
+            material.occlusionTexture = pygltflib.OcclusionTextureInfo(index=texture_indices["ao"])
 
-    # 6. 添加图像到GLTF
-    images = []
-    textures = []
-
-    texture_mapping = {
-        "albedo": "baseColorTexture",
-        "metallicRoughness": "metallicRoughnessTexture",
-        "normal": "normalTexture",
-        "ao": "occlusionTexture",
-    }
-
-    for tex_type, tex_path in textures_dict.items():
-        if tex_type in texture_mapping and tex_path:
-            # 添加图像
-            image = pygltflib.Image(uri=image_to_data_uri(tex_path))
-            images.append(image)
-
-            # 添加纹理
-            texture = pygltflib.Texture(source=len(images) - 1)
-            textures.append(texture)
-
-    # 7. 创建PBR材质
-    pbr_metallic_roughness = pygltflib.PbrMetallicRoughness(
-        baseColorFactor=[1.0, 1.0, 1.0, 1.0], metallicFactor=1.0, roughnessFactor=1.0
-    )
-
-    # 设置纹理索引
-    texture_index = 0
-    if "albedo" in textures_dict:
-        pbr_metallic_roughness.baseColorTexture = pygltflib.TextureInfo(index=texture_index)
-        texture_index += 1
-
-    if "metallicRoughness" in textures_dict:
-        pbr_metallic_roughness.metallicRoughnessTexture = pygltflib.TextureInfo(index=texture_index)
-        texture_index += 1
-
-    # 创建材质
-    material = pygltflib.Material(name="PBR_Material", pbrMetallicRoughness=pbr_metallic_roughness)
-
-    # 添加法线贴图
-    if "normal" in textures_dict:
-        material.normalTexture = pygltflib.NormalTextureInfo(index=texture_index)
-        texture_index += 1
-
-    # 添加AO贴图
-    if "ao" in textures_dict:
-        material.occlusionTexture = pygltflib.OcclusionTextureInfo(index=texture_index)
-
-    # 8. 更新GLTF
-    gltf.images = images
-    gltf.textures = textures
-    gltf.materials = [material]
-
-    # 确保mesh使用材质
-    if gltf.meshes:
-        for primitive in gltf.meshes[0].primitives:
-            primitive.material = 0
-
-    # 9. 保存最终GLB
-    gltf.save(output_path)
-    print(f"PBR GLB file saved: {output_path}")
-
-
+        gltf.images = images
+        gltf.textures = textures
+        gltf.materials = [material]
+        for gltf_mesh in gltf.meshes:
+            for primitive in gltf_mesh.primitives:
+                primitive.material = 0
+        gltf.save(str(output))
+    if not output.is_file() or output.stat().st_size == 0:
+        raise RuntimeError(f"PBR GLB output missing or empty: {output}")
+    return str(output)
