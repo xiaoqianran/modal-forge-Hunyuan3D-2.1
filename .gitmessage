@@ -1,0 +1,25 @@
+# <type>(<scope>): <subject>
+#
+# 阿里风格 Conventional Commits：标题建议不超过 50 字符，冒号后空一格
+# 示例：fix(paint): 修复透明背景预处理判断
+#
+# type：
+# feat     新增功能
+# fix      修复缺陷
+# docs     修改文档
+# style    调整格式（不改变行为）
+# refactor 重构代码（不新增功能、不修复缺陷）
+# perf     性能优化
+# test     增加或调整测试
+# build    构建系统、依赖变更
+# ci       持续集成变更
+# chore    其他维护任务
+# revert   回滚提交
+#
+# scope：shape、paint、cuda、modal、api、build、docs 等模块名，可省略。
+# subject：简洁动宾短语，结尾不加句号。
+#
+# 正文可选：标题下空一行；解释动机、修改与影响，每行建议不超过 72 字符。
+# 关联 Issue/PR 可在末尾使用 Refs: #123 或 Closes: #123。
+# 不兼容变更请使用 BREAKING CHANGE:，或在 type(scope) 后添加 !。
+#
