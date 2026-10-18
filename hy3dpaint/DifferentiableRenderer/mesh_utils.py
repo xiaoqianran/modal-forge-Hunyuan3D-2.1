@@ -326,26 +326,27 @@ def convert_obj_to_glb(
     auto_smooth_angle: float = 60,
     merge_vertices: bool = False,
 ) -> bool:
-    """Convert OBJ file to GLB format, using Blender when it is available."""
-    if not HAS_BPY:
-        try:
-            return _convert_obj_to_glb_trimesh(obj_path, glb_path)
-        except Exception:
-            return False
+    """Convert OBJ to GLB via Blender or trimesh; fail loudly on invalid output."""
+    from pathlib import Path
+
+    output = Path(glb_path)
     try:
-        _setup_blender_scene()
-        _clear_scene_objects()
+        if not HAS_BPY:
+            success = _convert_obj_to_glb_trimesh(obj_path, glb_path)
+        else:
+            _setup_blender_scene()
+            _clear_scene_objects()
+            bpy.ops.wm.obj_import(filepath=obj_path)
+            _select_mesh_objects()
+            _merge_vertices_if_needed(merge_vertices)
+            _apply_shading(shade_type, auto_smooth_angle)
+            bpy.ops.export_scene.gltf(filepath=glb_path, use_active_scene=True)
+            success = True
+    except Exception as exc:
+        raise RuntimeError(f"OBJ to GLB conversion failed: {obj_path} -> {glb_path}") from exc
 
-        # Import OBJ file
-        bpy.ops.wm.obj_import(filepath=obj_path)
-        _select_mesh_objects()
-
-        # Process meshes
-        _merge_vertices_if_needed(merge_vertices)
-        _apply_shading(shade_type, auto_smooth_angle)
-
-        # Export to GLB
-        bpy.ops.export_scene.gltf(filepath=glb_path, use_active_scene=True)
-        return True
-    except Exception:
-        return False
+    if not success:
+        raise RuntimeError(f"OBJ to GLB converter returned False: {obj_path} -> {glb_path}")
+    if not output.is_file() or output.stat().st_size == 0:
+        raise RuntimeError(f"OBJ to GLB output missing or empty: {glb_path}")
+    return True
