@@ -6,6 +6,7 @@
 
 | Commit | 来源 | 具体改动 |
 | --- | --- | --- |
+| `02261c2` | 自有 | 修复 Demo、API Worker、Gradio 与 minimal_demo 的背景去除判断；统一透明度检测与强制去背景接口；Shape/Paint 复用预处理后的图片。 |
 | 本次提交 | 自有 | 建立统一的 CHANGELOG，后续随代码变更持续更新。 |
 | `567cb8d` | [PR #159](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/pull/159) | `convert_utils.py`：GLB 保存日志改为英文，避免部分终端的中文编码异常。 |
 | `39acee4` | [PR #201](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/pull/201) | 6 个文件、10 处 `except:` → `except Exception:`，避免吞掉中断及退出异常。 |
