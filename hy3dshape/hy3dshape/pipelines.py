@@ -111,6 +111,10 @@ def export_to_trimesh(mesh_output):
 
 
 def get_obj_from_str(string, reload=False):
+    # Official 2mv checkpoints still use the 2.0 package name. This standalone
+    # distribution has the same classes under hy3dshape.
+    if string.startswith("hy3dgen.shapegen."):
+        string = "hy3dshape." + string[len("hy3dgen.shapegen."):]
     module, cls = string.rsplit(".", 1)
     if reload:
         module_imp = importlib.import_module(module)
@@ -606,7 +610,7 @@ class Hunyuan3DDiTPipeline:
         **kwargs,
     ) -> List[List[trimesh.Trimesh]]:
         callback = kwargs.pop("callback", None)
-        callback_steps = kwargs.pop("callback_steps", None)
+        callback_steps = kwargs.pop("callback_steps", 1)
 
         self.set_surface_extractor(mc_algo)
 
@@ -697,8 +701,12 @@ class Hunyuan3DDiTPipeline:
         enable_pbar=True
     ):
         if not output_type == "latent":
+            if not torch.isfinite(latents).all():
+                raise FloatingPointError("Non-finite Shape latents before VAE decode")
             latents = 1. / self.vae.scale_factor * latents
             latents = self.vae(latents)
+            if not torch.isfinite(latents).all():
+                raise FloatingPointError("Non-finite VAE features; mesh extraction was stopped")
             outputs = self.vae.latents2mesh(
                 latents,
                 bounds=box_v,
@@ -740,7 +748,10 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
         **kwargs,
     ) -> List[List[trimesh.Trimesh]]:
         callback = kwargs.pop("callback", None)
-        callback_steps = kwargs.pop("callback_steps", None)
+        callback_steps = kwargs.pop("callback_steps", 1)
+        validate_numerics = kwargs.pop("validate_numerics", True)
+        if callback is not None and (not isinstance(callback_steps, int) or callback_steps < 1):
+            raise ValueError("callback_steps must be a positive integer")
 
         self.set_surface_extractor(mc_algo)
 
@@ -793,6 +804,8 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                 timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
                 timestep = timestep / self.scheduler.config.num_train_timesteps
                 noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
+                if validate_numerics and not torch.isfinite(noise_pred).all():
+                    raise FloatingPointError(f"Non-finite DiT prediction at Shape step {i}")
 
                 if do_classifier_free_guidance:
                     noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
@@ -801,6 +814,9 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                 # compute the previous noisy sample x_t -> x_t-1
                 outputs = self.scheduler.step(noise_pred, t, latents)
                 latents = outputs.prev_sample
+
+                if validate_numerics and not torch.isfinite(latents).all():
+                    raise FloatingPointError(f"Non-finite Shape latents at step {i}")
 
                 if callback is not None and i % callback_steps == 0:
                     step_idx = i // getattr(self.scheduler, "order", 1)

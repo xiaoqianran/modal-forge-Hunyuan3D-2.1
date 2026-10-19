@@ -36,6 +36,46 @@ from .moe_layers import MoEBlock
 from ...utils import logger, synchronize_timer, smart_load_model
 
 
+class StableLayerNorm(nn.LayerNorm):
+    """ComfyUI's Hunyuan3D FP16 epsilon, selected from the actual input dtype.
+
+    No new parameters: original checkpoints and meta/assign loading still work.
+    ``fp16_safe=False`` is available for controlled comparisons only.
+    """
+    fp16_safe = True
+
+    def forward(self, x):
+        eps = max(self.eps, 1.0 / 65504) if self.fp16_safe and x.dtype == torch.float16 else self.eps
+        return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, eps)
+
+
+class StableRMSNorm(nn.RMSNorm):
+    fp16_safe = True
+
+    def forward(self, x):
+        eps = max(self.eps, 1.0 / 65504) if self.fp16_safe and x.dtype == torch.float16 else self.eps
+        return F.rms_norm(x, self.normalized_shape, self.weight, eps)
+
+
+def shape_attention(q, k, v, upcast=False):
+    """Keep CUDA fused SDPA by default; offer bounded FP32 attention for diagnosis.
+
+    Similar to the Strix Halo workaround, compute one head at a time so the
+    FP32 math backend does not materialize every head's attention matrix at once.
+    No global monkey patch and no quantized attention kernels.
+    """
+    with torch.backends.cuda.sdp_kernel(
+        enable_flash=not upcast, enable_math=upcast, enable_mem_efficient=not upcast,
+    ):
+        if not upcast:
+            return F.scaled_dot_product_attention(q, k, v)
+        return torch.cat([
+            F.scaled_dot_product_attention(q[:, head:head + 1].float(),
+                k[:, head:head + 1].float(), v[:, head:head + 1].float()).to(q.dtype)
+            for head in range(q.shape[1])
+        ], dim=1)
+
+
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
@@ -136,6 +176,7 @@ class MLP(nn.Module):
 
 
 class CrossAttention(nn.Module):
+    upcast_attention = False
     def __init__(
         self,
         qdim,
@@ -143,7 +184,7 @@ class CrossAttention(nn.Module):
         num_heads,
         qkv_bias=True,
         qk_norm=False,
-        norm_layer=nn.LayerNorm,
+        norm_layer=StableLayerNorm,
         with_decoupled_ca=False,
         decoupled_ca_dim=16,
         decoupled_ca_weight=1.0,
@@ -162,7 +203,7 @@ class CrossAttention(nn.Module):
         self.to_k = nn.Linear(kdim, qdim, bias=qkv_bias)
         self.to_v = nn.Linear(kdim, qdim, bias=qkv_bias)
 
-        # TODO: eps should be 1 / 65530 if using fp16
+        # Stable norms select the FP16 epsilon at runtime, including after .to().
         self.q_norm = norm_layer(self.head_dim, elementwise_affine=True, eps=1e-6) if qk_norm else nn.Identity()
         self.k_norm = norm_layer(self.head_dim, elementwise_affine=True, eps=1e-6) if qk_norm else nn.Identity()
         self.out_proj = nn.Linear(qdim, qdim, bias=True)
@@ -212,26 +253,13 @@ class CrossAttention(nn.Module):
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        with torch.backends.cuda.sdp_kernel(
-            enable_flash=True,
-            enable_math=False,
-            enable_mem_efficient=True
-        ):
-            q, k, v = map(lambda t: rearrange(t, 'b n h d -> b h n d', h=self.num_heads), (q, k, v))
-            context = F.scaled_dot_product_attention(
-                q, k, v
-            ).transpose(1, 2).reshape(b, s1, -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n h d -> b h n d', h=self.num_heads), (q, k, v))
+        context = shape_attention(q, k, v, self.upcast_attention).transpose(1, 2).reshape(b, s1, -1)
 
         if self.with_dca:
-            with torch.backends.cuda.sdp_kernel(
-                enable_flash=True,
-                enable_math=False,
-                enable_mem_efficient=True
-            ):
-                k_dca, v_dca = map(lambda t: rearrange(t, 'b n h d -> b h n d', h=self.num_heads),
-                                   (k_dca, v_dca))
-                context_dca = F.scaled_dot_product_attention(
-                    q, k_dca, v_dca).transpose(1, 2).reshape(b, s1, -1)
+            k_dca, v_dca = map(lambda t: rearrange(t, 'b n h d -> b h n d', h=self.num_heads),
+                               (k_dca, v_dca))
+            context_dca = shape_attention(q, k_dca, v_dca, self.upcast_attention).transpose(1, 2).reshape(b, s1, -1)
 
             context = context + self.dca_weight * context_dca
 
@@ -244,6 +272,7 @@ class Attention(nn.Module):
     """
     We rename some layer names to align with flash attention
     """
+    upcast_attention = False
 
     def __init__(
         self,
@@ -251,7 +280,7 @@ class Attention(nn.Module):
         num_heads,
         qkv_bias=True,
         qk_norm=False,
-        norm_layer=nn.LayerNorm,
+        norm_layer=StableLayerNorm,
     ):
         super().__init__()
         self.dim = dim
@@ -265,7 +294,7 @@ class Attention(nn.Module):
         self.to_q = nn.Linear(dim, dim, bias=qkv_bias)
         self.to_k = nn.Linear(dim, dim, bias=qkv_bias)
         self.to_v = nn.Linear(dim, dim, bias=qkv_bias)
-        # TODO: eps should be 1 / 65530 if using fp16
+        # Same dtype-aware epsilon as cross attention.
         self.q_norm = norm_layer(self.head_dim, elementwise_affine=True, eps=1e-6) if qk_norm else nn.Identity()
         self.k_norm = norm_layer(self.head_dim, elementwise_affine=True, eps=1e-6) if qk_norm else nn.Identity()
         self.out_proj = nn.Linear(dim, dim)
@@ -289,13 +318,8 @@ class Attention(nn.Module):
         q = self.q_norm(q)  # [b, h, s, d]
         k = self.k_norm(k)  # [b, h, s, d]
 
-        with torch.backends.cuda.sdp_kernel(
-            enable_flash=True,
-            enable_math=False,
-            enable_mem_efficient=True
-        ):
-            x = F.scaled_dot_product_attention(q, k, v)
-            x = x.transpose(1, 2).reshape(B, N, -1)
+        x = shape_attention(q, k, v, self.upcast_attention)
+        x = x.transpose(1, 2).reshape(B, N, -1)
 
         x = self.out_proj(x)
         return x
@@ -310,8 +334,8 @@ class HunYuanDiTBlock(nn.Module):
         text_states_dim=1024,
         use_flash_attn=False,
         qk_norm=False,
-        norm_layer=nn.LayerNorm,
-        qk_norm_layer=nn.RMSNorm,
+        norm_layer=StableLayerNorm,
+        qk_norm_layer=StableRMSNorm,
         with_decoupled_ca=False,
         decoupled_ca_dim=16,
         decoupled_ca_weight=1.0,
@@ -455,7 +479,7 @@ class FinalLayer(nn.Module):
     def __init__(self, final_hidden_size, out_channels):
         super().__init__()
         self.final_hidden_size = final_hidden_size
-        self.norm_final = nn.LayerNorm(final_hidden_size, elementwise_affine=True, eps=1e-6)
+        self.norm_final = StableLayerNorm(final_hidden_size, elementwise_affine=True, eps=1e-6)
         self.linear = nn.Linear(final_hidden_size, out_channels, bias=True)
 
     def forward(self, x):
@@ -569,8 +593,8 @@ class HunYuanDiTPlain(nn.Module):
         self.num_heads = num_heads
 
         self.hidden_size = hidden_size
-        self.norm = nn.LayerNorm if norm_type == 'layer' else nn.RMSNorm
-        self.qk_norm = nn.RMSNorm if qk_norm_type == 'rms' else nn.LayerNorm
+        self.norm = StableLayerNorm if norm_type == 'layer' else StableRMSNorm
+        self.qk_norm = StableRMSNorm if qk_norm_type == 'rms' else StableLayerNorm
         self.context_dim = context_dim
 
         self.with_decoupled_ca = with_decoupled_ca

@@ -49,14 +49,14 @@ SAMPLE = load_sampling_method()
 
 
 class FlowScheduleTests(unittest.TestCase):
-    def run_sampling(self, steps, shift=1.0, sigmas=None):
+    def run_sampling(self, steps, shift=1.0, sigmas=None, prediction=1.):
         scheduler = schedulers.FlowMatchEulerDiscreteScheduler(shift=shift)
         changes = []
         calls = []
 
         def model(latents, timestep, cond, **kwargs):
             calls.append(timestep.clone())
-            return torch.ones_like(latents)
+            return torch.full_like(latents, prediction)
 
         pipeline = SimpleNamespace(
             device=torch.device("cpu"), dtype=torch.float32, model=model,
@@ -77,6 +77,11 @@ class FlowScheduleTests(unittest.TestCase):
                         guidance_scale=-1, enable_pbar=False, output_type="latent",
                         callback=callback, callback_steps=1)
         return scheduler, calls, changes, result
+
+    def test_nonfinite_prediction_stops_before_mesh_export(self):
+        for prediction in (float("nan"), float("inf")):
+            with self.assertRaisesRegex(FloatingPointError, "DiT prediction"):
+                self.run_sampling(2, prediction=prediction)
 
     def test_default_has_requested_number_of_effective_updates(self):
         for steps in (1, 2, 50):
