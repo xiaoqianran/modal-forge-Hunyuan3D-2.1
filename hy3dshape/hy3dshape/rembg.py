@@ -49,13 +49,15 @@ class RMBG2Remover:
     Uses the model owner's Hugging Face distribution instead of requiring a
     second model hub SDK. Access/weights must already be available to the caller.
     """
-    def __init__(self, model_path="briaai/RMBG-2.0", device="cuda"):
+    def __init__(self, model_path="briaai/RMBG-2.0", device="cuda", revision=None):
         import torch
         from transformers import AutoModelForImageSegmentation
         self.device = device
+        if revision is None and model_path == "briaai/RMBG-2.0":
+            revision = "5df4c9c76d8170882c34f6986e848ee07fd0ba43"
         try:
             self.model = AutoModelForImageSegmentation.from_pretrained(
-                model_path, trust_remote_code=True,
+                model_path, trust_remote_code=True, revision=revision,
             ).eval().to(device)
         except (OSError, ImportError) as error:
             raise RuntimeError(

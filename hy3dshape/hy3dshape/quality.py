@@ -47,17 +47,49 @@ def inspect_mesh(mesh, allow_box_like=False, allow_flat=False):
     axis_area = float(mesh.area_faces[aligned].sum() / area)
     box_volume = float(np.prod(extents))
     volume_fill = float(abs(mesh.volume) / box_volume) if box_volume > 0 else 0.0
+    # A collapse can rotate between seeds. Infer an orthogonal frame from the
+    # area-weighted dominant face normals, rather than assuming world XYZ axes.
+    normals = mesh.face_normals.copy()
+    signs = np.sign(normals[np.arange(len(normals)), np.abs(normals).argmax(axis=1)])
+    normals *= np.where(signs == 0, 1, signs)[:, None]
+    bins, inverse = np.unique(np.rint(normals / .025).astype(np.int16), axis=0, return_inverse=True)
+    weights = np.bincount(inverse, weights=mesh.area_faces)
+    order = np.argsort(weights)[::-1]
+    chosen = inverse == order[0]
+    first = (normals[chosen] * mesh.area_faces[chosen, None]).sum(axis=0)
+    first /= np.linalg.norm(first)
+    second = None
+    for index in order[1:]:
+        normal = bins[index].astype(float)
+        normal /= np.linalg.norm(normal)
+        if abs(np.dot(first, normal)) < .1:
+            chosen = inverse == index
+            normal = (normals[chosen] * mesh.area_faces[chosen, None]).sum(axis=0)
+            normal /= np.linalg.norm(normal)
+            second = normal - first * np.dot(first, normal)
+            break
+    if second is None:
+        second = np.eye(3)[np.abs(first).argmin()]
+        second -= first * np.dot(first, second)
+    second /= np.linalg.norm(second)
+    frame = np.column_stack((first, second, np.cross(first, second)))
+    frame_extents = np.ptp(mesh.vertices @ frame, axis=0)
+    oriented_area = float(mesh.area_faces[np.max(np.abs(mesh.face_normals @ frame), axis=1) > .999].sum() / area)
+    oriented_volume = float(np.prod(frame_extents))
+    oriented_fill = float(abs(mesh.volume) / oriented_volume) if oriented_volume > 0 else 0.
+    oriented_thinness = float(frame_extents.min() / frame_extents.max())
     issues = []
     # Match our observed >98% axis-aligned failures, while allowing callers to
     # explicitly describe legitimate boxes or thin assets. Do not cut geometry.
-    if axis_area > .95 and thinness >= .02 and volume_fill > .75 and not allow_box_like:
+    if oriented_area > .95 and oriented_thinness >= .02 and oriented_fill > .75 and not allow_box_like:
         issues.append("suspected_box_collapse")
-    if thinness < .02 and axis_area > .95 and not allow_flat:
+    if oriented_thinness < .02 and oriented_area > .90 and not allow_flat:
         issues.append("suspected_flat_collapse")
     return {"accepted": not issues, "issues": issues, "vertices": len(mesh.vertices),
             "faces": len(mesh.faces), "extents": extents.tolist(),
             "axis_aligned_area_ratio": axis_area, "thinness": thinness,
-            "volume_bbox_ratio": volume_fill}
+            "volume_bbox_ratio": volume_fill, "oriented_planar_area_ratio": oriented_area,
+            "oriented_thinness": oriented_thinness, "oriented_volume_fill": oriented_fill}
 
 
 def silhouette_iou(target, rendered):
@@ -67,7 +99,7 @@ def silhouette_iou(target, rendered):
     return float(np.logical_and(target, rendered).sum() / union) if union else 0.0
 
 
-def render_shape(mesh, target_mask, output_dir, size=256):
+def render_shape(mesh, target_mask, output_dir, size=256, textured=False):
     """Four real clay renders + silhouette comparison; textures never hide shape.
 
     Camera search is deliberately limited: the input viewpoint is unknown, and
@@ -80,7 +112,7 @@ def render_shape(mesh, target_mask, output_dir, size=256):
     renderer = pyrender.OffscreenRenderer(size, size)
     target = Image.fromarray(np.asarray(target_mask).squeeze().astype(np.uint8)).resize(
         (size, size), Image.Resampling.NEAREST)
-    material = pyrender.MetallicRoughnessMaterial(
+    material = None if textured else pyrender.MetallicRoughnessMaterial(
         baseColorFactor=[.6, .67, .78, 1], metallicFactor=0, roughnessFactor=.8,
     )
     drawable = pyrender.Mesh.from_trimesh(mesh, material=material, smooth=False)

@@ -107,6 +107,13 @@ class GeometryTests(unittest.TestCase):
         sphere = trimesh.creation.icosphere(subdivisions=2)
         self.assertTrue(quality.inspect_mesh(sphere)["accepted"])
 
+    def test_rotated_cuboids_and_slabs_do_not_evade_detection(self):
+        for extents, issue in (([1, 2, 1.6], "suspected_box_collapse"),
+                               ([2, 2, .01], "suspected_flat_collapse")):
+            mesh = trimesh.creation.box(extents=extents)
+            mesh.apply_transform(trimesh.transformations.euler_matrix(.23, .51, .79))
+            self.assertIn(issue, quality.inspect_mesh(mesh)["issues"])
+
     def test_empty_and_nonfinite_geometry_is_rejected(self):
         self.assertFalse(quality.inspect_mesh(None)["accepted"])
         sphere = trimesh.creation.icosphere()
