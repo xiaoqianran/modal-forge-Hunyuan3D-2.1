@@ -5,6 +5,11 @@ from PIL import Image
 import base64
 import io
 
+try:
+    from .DifferentiableRenderer.mesh_io import load_mesh_file
+except ImportError:
+    from DifferentiableRenderer.mesh_io import load_mesh_file
+
 
 def combine_metallic_roughness(metallic_path, roughness_path, output_path):
     """
@@ -45,7 +50,7 @@ def create_glb_with_pbr_materials(obj_path, textures_dict, output_path):
     from tempfile import TemporaryDirectory
 
     inputs = dict(textures_dict)
-    mesh = trimesh.load(obj_path)
+    mesh = load_mesh_file(obj_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 

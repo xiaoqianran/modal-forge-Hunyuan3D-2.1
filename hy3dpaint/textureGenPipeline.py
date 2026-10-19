@@ -28,6 +28,7 @@ from utils.pipeline_utils import ViewProcessor
 from utils.image_super_utils import imageSuperNet
 from utils.uvwrap_utils import mesh_uv_wrap
 from DifferentiableRenderer.mesh_utils import convert_obj_to_glb
+from DifferentiableRenderer.mesh_io import load_mesh_file
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -124,7 +125,7 @@ class Hunyuan3DPaintPipeline:
             output_mesh_path = os.path.join(path, f"textured_mesh.obj")
 
         # Load mesh
-        mesh = trimesh.load(processed_mesh_path)
+        mesh = load_mesh_file(processed_mesh_path)
         mesh = mesh_uv_wrap(mesh)
         self.render.load_mesh(mesh=mesh)
 
@@ -171,7 +172,7 @@ class Hunyuan3DPaintPipeline:
             enhance_images["mr"][i] = self.models["super_model"](enhance_images["mr"][i])
 
         ###########  Bake  ##########
-        for i in range(len(enhance_images)):
+        for i in range(len(enhance_images["albedo"])):
             enhance_images["albedo"][i] = enhance_images["albedo"][i].resize(
                 (self.config.render_size, self.config.render_size)
             )

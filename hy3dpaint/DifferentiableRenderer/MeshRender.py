@@ -35,8 +35,21 @@ except Exception:
 
 try:
     from .mesh_inpaint_processor import meshVerticeInpaint  # , meshVerticeColor
-except Exception:
-    print("InPaint Function CAN NOT BE Imported!!!")
+except ModuleNotFoundError as relative_exc:
+    try:
+        from mesh_inpaint_processor import meshVerticeInpaint
+    except Exception as exc:
+        meshVerticeInpaint = None
+        _inpaint_import_error = (
+            exc if relative_exc.name == f"{__package__}.mesh_inpaint_processor" else relative_exc
+        )
+    else:
+        _inpaint_import_error = None
+except Exception as exc:
+    meshVerticeInpaint = None
+    _inpaint_import_error = exc
+else:
+    _inpaint_import_error = None
 
 
 class RenderMode(Enum):
@@ -1138,6 +1151,7 @@ class MeshRender:
         channel = image.shape[-1]
         texture = torch.zeros(self.texture_size + (channel,)).to(self.device)
         cos_map = torch.zeros(self.texture_size + (1,)).to(self.device)
+        boundary_map = torch.zeros_like(cos_map)
 
         proj = self.camera_proj_mat
         r_mv = get_mv_matrix(
@@ -1158,6 +1172,11 @@ class MeshRender:
         tex_depth = pos_camera[:, 2].reshape(1, -1, 1).contiguous()
         rast_out, rast_out_db = self.raster_rasterize(pos_clip, self.pos_idx, resolution=resolution)
         visible_mask = torch.clamp(rast_out[..., -1:], 0, 1)[0, ...]
+
+        # A valid mesh may be completely hidden from one of the candidate views.
+        # It contributes no color or confidence to the multiview bake.
+        if not torch.any(visible_mask > 0):
+            return texture, cos_map, boundary_map
 
         if self.shader_type == "vertex":
             vertex_normals = trimesh.geometry.mean_vertex_normals(
@@ -1180,7 +1199,8 @@ class MeshRender:
         depth = depth[0, ...]
 
         depth_max, depth_min = depth[visible_mask > 0].max(), depth[visible_mask > 0].min()
-        depth_normalized = (depth - depth_min) / (depth_max - depth_min)
+        depth_range = (depth_max - depth_min).clamp_min(torch.finfo(depth.dtype).eps)
+        depth_normalized = (depth - depth_min) / depth_range
         depth_image = depth_normalized * visible_mask  # Mask out background.
 
         sketch_image = self.render_sketch_from_depth(depth_image)
@@ -1209,6 +1229,9 @@ class MeshRender:
             visible_mask = visible_mask * (sketch_image < 0.5)
 
         cos_image[visible_mask == 0] = 0
+
+        if not torch.any(visible_mask > 0):
+            return texture, cos_map, boundary_map
 
         method = self.bake_mode if method is None else method
 
@@ -1404,6 +1427,12 @@ class MeshRender:
             mask = (mask.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
 
         if vertex_inpaint:
+            if meshVerticeInpaint is None:
+                raise RuntimeError(
+                    "Mesh inpainting extension could not be imported. Build it in "
+                    "hy3dpaint/DifferentiableRenderer with bash compile_mesh_painter.sh "
+                    "(or python -m pip install --no-build-isolation .)."
+                ) from _inpaint_import_error
             vtx_pos, pos_idx, vtx_uv, uv_idx = self.get_mesh()
             texture_np, mask = meshVerticeInpaint(texture_np, mask, vtx_pos, vtx_uv, pos_idx, uv_idx)
 

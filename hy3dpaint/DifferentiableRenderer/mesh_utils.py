@@ -18,6 +18,7 @@ import math
 import numpy as np
 from io import StringIO
 from typing import Optional, Tuple, Dict, Any
+from .mesh_io import load_mesh_file
 
 try:
     import bpy
@@ -287,7 +288,7 @@ def _convert_obj_to_glb_trimesh(obj_path: str, glb_path: str) -> bool:
     import trimesh
     from PIL import Image
 
-    mesh = trimesh.load(obj_path, force="mesh", process=False)
+    mesh = load_mesh_file(obj_path, force="mesh", process=False)
     uv = getattr(mesh.visual, "uv", None)
 
     mtl_path = os.path.splitext(obj_path)[0] + ".mtl"

@@ -121,6 +121,10 @@ class ViewProcessor:
             project_weighted_cos_maps.append(project_cos_map)
             project_boundary_maps.append(project_boundary_map)
             texture, ori_trust_map = self.render.fast_bake_texture(project_textures, project_weighted_cos_maps)
+        if not project_textures:
+            raise ValueError("No views were supplied for texture baking")
+        if not torch.any(ori_trust_map > 1e-8):
+            raise ValueError("No visible mesh surface in any texture view; check mesh geometry and camera framing")
         return texture, ori_trust_map > 1e-8
 
     def texture_inpaint(self, texture, mask, defualt=None):

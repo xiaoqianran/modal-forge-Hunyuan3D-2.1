@@ -58,7 +58,9 @@ RUN conda install -c conda-forge libstdcxx-ng -y
 RUN pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 
 # Clone Hunyuan3D-2.1 repository
-RUN git clone https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1.git
+ARG FORK_REF=main
+RUN git clone https://github.com/xiaoqianran/modal-forge-Hunyuan3D-2.1.git Hunyuan3D-2.1 && \
+    git -C Hunyuan3D-2.1 checkout "$FORK_REF" && git -C Hunyuan3D-2.1 rev-parse HEAD
 
 # Install Python dependencies from modified requirements.txt
 RUN pip install -r Hunyuan3D-2.1/requirements.txt
@@ -69,7 +71,7 @@ RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer && \
     export TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0" && \
     export CUDA_NVCC_FLAGS="-allow-unsupported-compiler" && \
     # Install with editable mode
-    pip install -e .
+    pip install --no-build-isolation -e .
 
 # Install DifferentiableRenderer
 RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint/DifferentiableRenderer && \

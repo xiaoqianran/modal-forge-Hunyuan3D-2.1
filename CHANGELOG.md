@@ -6,7 +6,8 @@
 
 | Commit | 来源 | 具体改动 |
 | --- | --- | --- |
-| 本次提交 | 自有（[Issue #209](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/issues/209)） | 默认 Flow Matching sigma 序列排除终点，由调度器追加唯一的 1.0，消除最后一次无效欧拉更新；自定义 sigma 行为不变。CPU 回归覆盖 1/2/50 步、shift=1/3 及自定义序列，修复前 4 个子用例失败，修复后全部通过；未验证真实模型生成质量。 |
+| 本次提交 | 自有（#195/#121/#214/#42，PR #79 部分） | 修复空视角与恒定深度反投影；无任何可信视角时明确报错；兼容 GLB 未知 chunk 且不改写输入；保留补洞扩展导入异常并提供跨平台构建入口；纳入 #79 定宽整数修复；统一缩放全部增强视角；Docker 使用本 Fork。CPU 19 项回归通过，Windows CUDA 构建与真实 GPU 流程待验证。 |
+| `68fe8e7` | 自有（[Issue #209](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/issues/209)） | 默认 Flow Matching sigma 序列排除终点，由调度器追加唯一的 1.0，消除最后一次无效欧拉更新；自定义 sigma 行为不变。CPU 回归覆盖 1/2/50 步、shift=1/3 及自定义序列，修复前 4 个子用例失败，修复后全部通过；未验证真实模型生成质量。 |
 | `7ddd33f` | 自有（GLB v3） | PBR 导出使用独立临时目录；正确 MIME、纹理索引及全部 Mesh 材质绑定；Paint remesh 文件唯一化；纹理失败不再伪装成功；异步 API 支持报告任务失败，Worker 和 Paint Pipeline 串行化共享渲染状态。 |
 | `652c30b` | 自有（#215 v2） | 加固 #215 的 OBJ→GLB 导出：保留异常原因，检测失败返回值、输出缺失与空文件；PBR 材质算法不变。 |
 | `02261c2` | 自有 | 修复 Demo、API Worker、Gradio 与 minimal_demo 的背景去除判断；统一透明度检测与强制去背景接口；Shape/Paint 复用预处理后的图片。 |
