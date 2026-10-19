@@ -6,7 +6,8 @@
 
 | Commit | 来源 | 具体改动 |
 | --- | --- | --- |
-| 本次提交 | 自有（GLB v3） | PBR 导出使用独立临时目录；正确 MIME、纹理索引及全部 Mesh 材质绑定；Paint remesh 文件唯一化；纹理失败不再伪装成功；异步 API 支持报告任务失败，Worker 和 Paint Pipeline 串行化共享渲染状态。 |
+| 本次提交 | 自有（[Issue #209](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/issues/209)） | 默认 Flow Matching sigma 序列排除终点，由调度器追加唯一的 1.0，消除最后一次无效欧拉更新；自定义 sigma 行为不变。CPU 回归覆盖 1/2/50 步、shift=1/3 及自定义序列，修复前 4 个子用例失败，修复后全部通过；未验证真实模型生成质量。 |
+| `7ddd33f` | 自有（GLB v3） | PBR 导出使用独立临时目录；正确 MIME、纹理索引及全部 Mesh 材质绑定；Paint remesh 文件唯一化；纹理失败不再伪装成功；异步 API 支持报告任务失败，Worker 和 Paint Pipeline 串行化共享渲染状态。 |
 | `652c30b` | 自有（#215 v2） | 加固 #215 的 OBJ→GLB 导出：保留异常原因，检测失败返回值、输出缺失与空文件；PBR 材质算法不变。 |
 | `02261c2` | 自有 | 修复 Demo、API Worker、Gradio 与 minimal_demo 的背景去除判断；统一透明度检测与强制去背景接口；Shape/Paint 复用预处理后的图片。 |
 | `b4c57ab` | 自有 | 建立统一的 CHANGELOG，后续随代码变更持续更新。 |
